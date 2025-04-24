@@ -1,0 +1,1036 @@
+---
+title: "F1 Data Cleaned"
+author: "Kelly Arseneau"
+date: "2024-06-19"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "C:/Users/kelly/Documents/F1 data cleaned")
+
+```
+```{r}
+# List of required packages
+packages <- c("dplyr", "tidyr", "stringr", "ggplot2", "plotly", "corrplot", 
+              "DataExplorer", "arules", "arulesViz", "cluster", "factoextra", 
+              "NbClust", "rpart", "rpart.plot", "rattle", "e1071", "kernlab", "randomForest", "lattice")
+
+# Install packages if they are not already installed
+for (pkg in packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# Load necessary libraries
+library(lattice)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(plotly)
+library(corrplot)
+library(DataExplorer)
+library(arules)
+library(arulesViz)
+library(cluster)
+library(factoextra)
+library(NbClust)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(e1071)
+library(kernlab)
+library(randomForest)
+
+
+```
+```{r}
+# Set the working directory
+setwd("C:/Users/kelly/Documents/F1 data cleaned")
+
+
+# List all CSV files in the directory
+file_list <- list.files(pattern = "*.csv")
+
+# Load all CSV files into a list of dataframes
+data_list <- lapply(file_list, read.csv)
+
+# Name each dataframe in the list according to the file name
+names(data_list) <- gsub("\\.csv$", "", file_list)
+
+# Check the structure of each dataframe
+for (name in names(data_list)) {
+  cat("Data structure for:", name, "\n")
+  print(str(data_list[[name]]))
+  cat("\n")
+}
+
+```
+Storing dataframes in a list has several benefits:
+
+Organization: It keeps all related dataframes in a single object, making it easier to manage and reference them.
+Iterative Processing: You can easily apply functions to each dataframe using lapply or sapply, reducing code duplication and making it simpler to perform similar operations across multiple dataframes.
+Memory Management: It can be more memory-efficient, as it avoids cluttering the global environment with multiple variables.
+Code Readability: It makes the code cleaner and more readable, as you can loop through the list for operations, rather than writing repetitive code for each dataframe.
+Dynamic Handling: It allows dynamic handling of dataframes, which is useful when the number of dataframes or their names might change.
+
+```{r}
+# Function to check for missing values and data types
+check_data <- function(data) {
+  missing_values <- colSums(is.na(data))
+  data_types <- sapply(data, class)
+  summary_data <- summary(data)
+  
+  list(missing_values = missing_values, data_types = data_types, summary = summary_data)
+}
+
+# Apply the function to all datasets in the data_list
+check_results <- lapply(data_list, check_data)
+
+# Print the results
+for (name in names(check_results)) {
+  cat("Missing values in", name, ":\n")
+  print(check_results[[name]]$missing_values)
+  cat("\nData types in", name, ":\n")
+  print(check_results[[name]]$data_types)
+  cat("\nSummary of", name, ":\n")
+  print(check_results[[name]]$summary)
+  cat("\n\n")
+}
+
+
+```
+
+```{r}
+# Inspect the data before conversion
+print(head(data_list$cleaned_lap_times$lap_time))
+print(head(data_list$cleaned_qualifying$q1))
+print(head(data_list$cleaned_qualifying$q2))
+print(head(data_list$cleaned_qualifying$q3))
+print(head(data_list$cleaned_results$fastestLapTime))
+print(head(data_list$cleaned_sprint_results$fastestLapTime))
+head(data_list$cleaned_lap_times)
+head(data_list$cleaned_drivers)
+```
+
+ Based on the output, there are no missing values in any of the datasets, and the data types are consistent. Proceed with further steps in the data preparation process.
+
+Data Cleaning and Preparation
+Convert Time Columns: Convert any time columns to an appropriate format for analysis.
+Handle Categorical Variables: Convert necessary categorical variables to factors.
+Focus the Data: Narrow down datasets to only include the years 2014-2022 to account for changes in point systems and racing technology.
+
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(lubridate)
+
+# Function to convert time to total seconds using a custom approach
+convert_time_custom <- function(time_str) {
+  # Remove the "0 days" prefix
+  time_part <- sub("0 days ", "", time_str)
+  
+  # Parse the time string into hours, minutes, seconds, and milliseconds
+  hms_parts <- strsplit(time_part, ":")[[1]]
+  sec_parts <- strsplit(hms_parts[3], "\\.")[[1]]
+  
+  minutes <- as.numeric(hms_parts[2])
+  seconds <- as.numeric(sec_parts[1])
+  milliseconds <- as.numeric(sec_parts[2])
+  
+  # Calculate total seconds
+  total_seconds <- minutes * 60 + seconds + milliseconds / 1e6
+  return(total_seconds)
+}
+
+# Apply the function to each relevant column
+data_list$cleaned_lap_times <- data_list$cleaned_lap_times %>%
+  mutate(lap_time_seconds = sapply(lap_time, convert_time_custom))
+
+data_list$cleaned_qualifying <- data_list$cleaned_qualifying %>%
+  mutate(q1_seconds = sapply(q1, convert_time_custom),
+         q2_seconds = sapply(q2, convert_time_custom),
+         q3_seconds = sapply(q3, convert_time_custom))
+
+data_list$cleaned_results <- data_list$cleaned_results %>%
+  mutate(fastestLapTime_seconds = sapply(fastestLapTime, convert_time_custom))
+
+data_list$cleaned_sprint_results <- data_list$cleaned_sprint_results %>%
+  mutate(fastestLapTime_seconds = sapply(fastestLapTime, convert_time_custom))
+
+# Inspect the converted columns
+head(data_list$cleaned_lap_times)
+head(data_list$cleaned_qualifying)
+head(data_list$cleaned_results)
+head(data_list$cleaned_sprint_results)
+head(data_list$cleaned_sprint_results)
+
+```
+
+The structures now reflect appropriate data types for further analysis.
+Exploratory Data Analysis (EDA)
+Next, basic EDA is performed to understand the data better. 
+This includes:
+Summary statistics for numerical variables.
+Distribution plots for key variables.
+Correlation analysis for numerical features.
+Visualizing trends over time for constructors' performances.
+The following datasets are used for EDA:
+cleaned_constructor_standings
+cleaned_drivers
+cleaned_results
+cleaned_races
+cleaned_constructor_standings
+The cleaned_constructor_standings dataset provides valuable information on the performance of constructors in each race, including points, positions, and wins. This data is crucial for analyzing trends in constructors' success over time and identifying patterns that contribute to their overall standings in the championship.
+
+cleaned_drivers
+The cleaned_drivers dataset contains detailed information about the drivers, such as their nationality, date of birth, and career details. This dataset is essential for understanding the demographics and background of the drivers, which can be linked to their performance and the constructors they represent.
+
+cleaned_results
+The cleaned_results dataset records the outcomes of individual races, including positions, points scored, laps completed, and fastest lap times. This dataset is fundamental for examining the performance of drivers and constructors in specific races, enabling detailed analysis of race results and performance metrics.
+
+cleaned_races
+The cleaned_races dataset provides metadata about each race, including the year, round, and circuit details. This data is important for contextualizing the race results and constructor standings within specific seasons and circuits, allowing for a comprehensive analysis of performance trends over time and across different locations.
+
+These datasets collectively offer a robust foundation for conducting exploratory data analysis (EDA) and identifying factors that influence the performance and success of constructors in the Formula 1 World Championship.
+
+```{r}
+# Summary statistics for numerical variables in key datasets
+summary_stats_constructor_standings <- summary(data_list$cleaned_constructor_standings)
+summary_stats_drivers <- summary(data_list$cleaned_drivers)
+summary_stats_results <- summary(data_list$cleaned_results)
+summary_stats_races <- summary(data_list$cleaned_races)
+
+# Print summary statistics
+print("Summary Statistics for Constructor Standings:")
+print(summary_stats_constructor_standings)
+
+print("Summary Statistics for Drivers:")
+print(summary_stats_drivers)
+
+print("Summary Statistics for Results:")
+print(summary_stats_results)
+
+print("Summary Statistics for Races:")
+print(summary_stats_races)
+
+```
+Review the key columns and determine which ones should be factors for analysis.
+
+
+
+```{r}
+summary(data_list$cleaned_lap_times)
+summary(data_list$cleaned_qualifying)
+summary(data_list$cleaned_results)
+summary(data_list$cleaned_sprint_results)
+
+```
+
+```{r}
+# Convert necessary columns to factors
+data_list$cleaned_lap_times <- data_list$cleaned_lap_times %>%
+  mutate(across(c(driverId, raceId, position), as.factor))
+
+data_list$cleaned_qualifying <- data_list$cleaned_qualifying %>%
+  mutate(across(c(driverId, raceId, constructorId, position), as.factor))
+
+data_list$cleaned_results <- data_list$cleaned_results %>%
+  mutate(across(c(driverId, raceId, constructorId, position, statusId, grid_position), as.factor))
+
+data_list$cleaned_sprint_results <- data_list$cleaned_sprint_results %>%
+  mutate(across(c(driverId, raceId, constructorId, position, statusId, grid_position), as.factor))
+
+data_list$cleaned_constructor_standings <- data_list$cleaned_constructor_standings %>%
+  mutate(across(c(constructorId, raceId, position), as.factor))
+
+data_list$cleaned_races <- data_list$cleaned_races %>%
+  mutate(across(c(year, round, circuitId), as.factor))
+
+```
+Constructor Standings
+constructorStandingsId: Numeric, likely a unique identifier.
+raceId: Numeric, identifier for races, might be treated as a factor if race-specific analysis is needed.
+constructorId: Numeric, identifier for constructors, should be a factor.
+points: Numeric, leave as is.
+position: Numeric, could be a factor if you want to analyze rankings.
+wins: Numeric, leave as is.
+Drivers
+driverId: Numeric, unique identifier for drivers, should be a factor.
+driver_code: Character, already a factor-like variable.
+driver_forename: Character, can remain as is.
+driver_surname: Character, can remain as is.
+driver_dob: Character, can be converted to Date if needed.
+driver_nationality: Character, should be a factor.
+driver_home: Character, can remain as is or be a factor.
+Results
+resultId: Numeric, unique identifier.
+raceId: Numeric, identifier for races, should be a factor for race-specific analysis.
+driverId: Numeric, should be a factor.
+constructorId: Numeric, should be a factor.
+grid_position: Numeric, can remain as is.
+position: Numeric, can be a factor for ranking analysis.
+points: Numeric, leave as is.
+laps: Numeric, leave as is.
+fastestLap: Numeric, leave as is.
+fastestLapRank: Numeric, leave as is.
+fastestLapTime: Character, already converted to seconds.
+fastestLapSpeed: Numeric, leave as is.
+statusId: Numeric, should be a factor.
+fastestLapTime_seconds: Numeric, leave as is.
+Races
+raceId: Numeric, unique identifier.
+year: Numeric, could be a factor for year-specific analysis.
+round: Numeric, could be a factor.
+circuitId: Numeric, should be a factor.
+```{r}
+# Summary statistics and distribution plots
+summary(data_list$cleaned_constructor_standings)
+ggplot(data_list$cleaned_constructor_standings, aes(x = points)) + 
+  geom_histogram(binwidth = 10) + 
+  ggtitle("Distribution of Constructor Points")
+
+ggplot(data_list$cleaned_constructor_standings, aes(x = wins)) + 
+  geom_histogram(binwidth = 1) + 
+  ggtitle("Distribution of Constructor Wins")
+
+ggplot(data_list$cleaned_constructor_standings, aes(x = position)) + 
+  geom_bar() + 
+  ggtitle("Distribution of Constructor Positions")
+```
+This transformation will help handle the skewness in data, especially due to the changes in the points system over different eras of Formula 1 racing. A log transformation is a mathematical approach commonly used to manage data that exhibits skewed distributions, typically right-skewed distributions, where most of the data points are clustered towards the left with a long tail extending to the right. 
+```{r}
+# Load necessary library
+library(dplyr)
+
+# Applying log transformation to the 'points' and 'wins' columns
+# Adding a small constant to avoid taking log of zero for both columns
+data_list$cleaned_constructor_standings <- data_list$cleaned_constructor_standings %>%
+  mutate(points_log = log(points + 1),  # log transformation with a shift to handle zero points
+         wins_log = log(wins + 1))      # log transformation with a shift to handle zero wins
+
+# View the first few rows to check the transformed data
+head(data_list$cleaned_constructor_standings)
+
+
+```
+
+
+
+```{r}
+
+# Load necessary library
+library(ggplot2)
+
+# Histogram for the log-transformed 'points' column
+ggplot(data_list$cleaned_constructor_standings, aes(x = points_log)) +
+  geom_histogram(binwidth = 0.5, fill = "blue", color = "black") +
+  ggtitle("Histogram of Log-Transformed Points") +
+  xlab("Log-Transformed Points") +
+  ylab("Frequency")
+
+# Histogram for the log-transformed 'wins' column
+ggplot(data_list$cleaned_constructor_standings, aes(x = wins_log)) +
+  geom_histogram(binwidth = 0.5, fill = "red", color = "black") +
+  ggtitle("Histogram of Log-Transformed Wins") +
+  xlab("Log-Transformed Wins") +
+  ylab("Frequency")
+
+
+```
+Since the log transformation still results in a heavy skew due to the large number of zeros, the Inverse Hyperbolic Sine (IHS) transformation will be utilized. It is often used as an alternative to the log transformation, especially in economic data where zero or negative values might be present. The IHS transformation can handle zeros directly and typically offers a better approach for stabilizing variance across a wider range of data values.
+```{r}
+
+# Applying the Inverse Hyperbolic Sine Transformation to the 'points' and 'wins' columns
+data_list$cleaned_constructor_standings <- data_list$cleaned_constructor_standings %>%
+  mutate(points_ihs = asinh(points),
+         wins_ihs = asinh(wins))
+
+# View the first few rows to check the transformed data
+head(data_list$cleaned_constructor_standings)
+
+```
+
+```{r}
+# Load necessary library
+library(ggplot2)
+
+# Histogram for the IHS-transformed 'points' column
+ggplot(data_list$cleaned_constructor_standings, aes(x = points_ihs)) +
+  geom_histogram(binwidth = 0.5, fill = "blue", color = "black") +
+  ggtitle("Histogram of IHS-Transformed Points") +
+  xlab("IHS-Transformed Points") +
+  ylab("Frequency")
+
+# Histogram for the IHS-transformed 'wins' column
+ggplot(data_list$cleaned_constructor_standings, aes(x = wins_ihs)) +
+  geom_histogram(binwidth = 0.5, fill = "red", color = "black") +
+  ggtitle("Histogram of IHS-Transformed Wins") +
+  xlab("IHS-Transformed Wins") +
+  ylab("Frequency")
+
+```
+```{r}
+summary(data_list$cleaned_constructor_standings)
+```
+Given the structure of the data, with a notable presence of zeros but also a need to derive meaningful insights, the analysis proceeds with both clustering and Random Forest. Each of these methods offers a unique perspective and can be particularly insightful for understanding different aspects of constructor performance in Formula 1 racing.
+Upon completing the EDA, the next logical step in the data analysis lifecycle is to apply more sophisticated analytical techniques that can model the relationships unearthed during the exploratory phase. Clustering, particularly using the K-means algorithm, is an effective unsupervised learning technique that groups data points into clusters such that items within the same cluster are more similar to each other than to those in other clusters. This method is especially suited for the following reasons:
+
+Pattern Recognition: Clustering can help identify inherent groupings within the constructors based on various performance metrics. These groupings might indicate different strategies or capabilities that are not immediately apparent through basic EDA.
+
+Dimensionality Reduction: Through clustering, we can abstract and reduce the complexity of the data, making it easier to visualize and interpret the relationships between multiple performance indicators.
+
+Hypothesis Generation: The results from clustering can lead to new hypotheses about what influences performance in Formula 1 races, which can be further tested using more targeted analyses.
+
+Operational Segmentation: In a practical sense, clustering constructors based on performance metrics like transformed points and wins can help identify which teams are performing similarly. This insight is valuable for benchmarking and competitive analysis.
+
+Implementing K-means Clustering
+
+K-means is particularly appealing for its simplicity and efficiency in processing large datasets. The algorithm partitions the data into K predefined distinct non-overlapping subgroups (clusters) where each data point belongs to only one group. It tries to make the inter-cluster data points as similar as possible while also keeping the clusters as different (far) as possible. It assigns data points to a cluster such that the sum of the squared distance between the data points and the cluster’s centroid (arithmetic mean of all the data points that belong to that cluster) is minimized.
+
+Procedure:
+
+Data Preparation: Scale and normalize the dataset to ensure each variable contributes equally to the distance calculations, which is crucial given the range of metrics like points and wins.
+Determine Optimal K: Use methods like the Elbow Method, Silhouette Score, or Gap Statistic to determine the best number of clusters.
+Cluster Analysis: After applying K-means, analyze the characteristics of each cluster. Evaluate how constructors are grouped together and what these groupings signify about their performance characteristics.
+Visualization: Utilize PCA (Principal Component Analysis) or t-SNE (t-Distributed Stochastic Neighbor Embedding) to reduce dimensionality for visualization, helping to illustrate the clustering outcomes in a two-dimensional space.
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(stats)
+library(ggplot2)
+library(cluster)
+
+# Select and scale the relevant columns for clustering
+data_for_clustering <- data_list$cleaned_constructor_standings %>%
+  select(points_ihs, wins_ihs) %>%
+  scale()  # Standardizes the data (mean = 0, sd = 1)
+
+# View the scaled data
+head(data_for_clustering)
+
+
+```
+The head of the data_for_clustering shows the scaled values of the points_ihs and wins_ihs columns. These values have been standardized to have a mean of 0 and a standard deviation of 1, which is appropriate for K-means clustering.
+```{r}
+# Determining the optimal number of clusters using the Elbow Method
+set.seed(123)  # for reproducibility
+wss <- sapply(1:15, function(k) {
+  kmeans(data_for_clustering, centers = k, nstart = 20)$tot.withinss
+})
+
+# Plot the elbow curve
+plot(1:15, wss, type = "b", xlab = "Number of Clusters", ylab = "Total Within-Cluster Sum of Squares", main = "Elbow Method for Determining Optimal k")
+
+```
+
+
+```{r}
+# Apply K-means clustering with the chosen number of clusters
+set.seed(123)
+kmeans_result <- kmeans(data_for_clustering, centers = 3, nstart = 20)
+
+# View the clustering result
+print(kmeans_result)
+
+# Add the cluster membership to the original dataframe
+data_list$cleaned_constructor_standings$cluster <- kmeans_result$cluster
+
+# View the first few rows of the data with cluster labels
+head(data_list$cleaned_constructor_standings)
+
+```
+
+```{r}
+# Summarize data by cluster
+cluster_summary <- aggregate(data_list$cleaned_constructor_standings[, c("points", "wins")], by = list(cluster = kmeans_result$cluster), mean)
+
+# Print cluster summary
+print(cluster_summary)
+
+```
+Interpretation of K-means Clustering Results
+Summary:
+Number of Clusters: 3
+Cluster Sizes: 1763, 5458, 5830
+Cluster Means:
+Cluster 1: High points and wins
+Cluster 2: Moderate points and low wins
+Cluster 3: Low points and low wins
+Within-cluster Sum of Squares (SS):
+Cluster 1: 1278.3154
+Cluster 2: 2496.0446
+Cluster 3: 782.7648
+Between-cluster SS / Total SS: 82.5% (indicating a good clustering solution as a high percentage of variance is explained by the clustering)
+Interpretation:
+Cluster Characteristics:
+
+Cluster 1 (High points, High wins):
+Represents top-performing constructors with high points and wins.
+These constructors likely exhibit superior race strategies and performance.
+Cluster 2 (Moderate points, Low wins):
+Represents mid-tier constructors with moderate points but low wins.
+These constructors perform reasonably well but do not frequently secure wins.
+Cluster 3 (Low points, Low wins):
+Represents lower-performing constructors with both low points and wins.
+These constructors struggle to compete effectively in races.
+Cluster Sizes:
+
+Cluster 1: 1763 constructors - fewer in number, representing the elite performers.
+Cluster 2: 5458 constructors - the largest group, indicating a broad range of mid-tier performance.
+Cluster 3: 5830 constructors - a significant number of constructors with lower performance.
+Variance Explanation:
+
+The between-cluster sum of squares accounts for 82.5% of the total variance, suggesting that the clustering effectively captures the inherent structure of the data.
+Next Steps:
+Add Cluster Labels to Original Data:
+
+Incorporate the cluster labels into the original cleaned_constructor_standings dataframe to facilitate further analysis.
+Visualize the Clusters:
+
+Use PCA or t-SNE to visualize the clusters in a 2D space to better understand the separation between clusters.
+
+
+```{r}
+# Add the cluster membership to the original dataframe
+data_list$cleaned_constructor_standings$cluster <- kmeans_result$cluster
+
+# PCA for visualization
+pca_results <- prcomp(data_for_clustering)
+
+# Add PCA results to the original dataframe
+data_list$cleaned_constructor_standings$pca1 <- pca_results$x[, 1]
+data_list$cleaned_constructor_standings$pca2 <- pca_results$x[, 2]
+
+# Plot the clusters
+ggplot(data_list$cleaned_constructor_standings, aes(x = pca1, y = pca2, color = as.factor(cluster))) +
+  geom_point(alpha = 0.5) +
+  labs(color = "Cluster") +
+  ggtitle("PCA Plot of Constructor Standings Clusters")
+
+
+```
+```{r}
+print(pca_results)
+```
+Principal Component Analysis (PCA)  Results
+The PCA analysis earlier in the process indicated that the first two principal components (PC1 and PC2) explained a significant portion of the variance in the data:
+
+Standard Deviations:
+
+PC1: 1.2699335
+PC2: 0.6223094
+Rotation Matrix:
+
+PC1: points_ihs and wins_ihs both have a coefficient of -0.7071068.
+PC2: points_ihs has a coefficient of -0.7071068 and wins_ihs has a coefficient of 0.7071068.
+This indicates that both points_ihs and wins_ihs are equally important in defining PC1, while they have opposite contributions to PC2.
+
+```{r}
+# Load necessary library
+library(ggplot2)
+
+# Create a custom mapping for cluster labels
+cluster_labels <- c("1" = "High Points, High Wins",
+                    "2" = "Moderate Points, Low Wins",
+                    "3" = "Low Points, Low Wins")
+
+# Add the custom labels to the dataframe
+data_list$cleaned_constructor_standings$cluster_label <- factor(data_list$cleaned_constructor_standings$cluster,
+                                                                levels = c(1, 2, 3),
+                                                                labels = c("High Points, High Wins",
+                                                                           "Moderate Points, Low Wins",
+                                                                           "Low Points, Low Wins"))
+
+# PCA for visualization
+pca_results <- prcomp(data_for_clustering)
+
+# Add PCA results to the original dataframe
+data_list$cleaned_constructor_standings$pca1 <- pca_results$x[, 1]
+data_list$cleaned_constructor_standings$pca2 <- pca_results$x[, 2]
+
+# Plot the clusters with custom labels
+ggplot(data_list$cleaned_constructor_standings, aes(x = pca1, y = pca2, color = cluster_label)) +
+  geom_point(alpha = 0.5) +
+  labs(color = "Cluster") +
+  ggtitle("PCA Plot of Constructor Standings Clusters") +
+  theme(legend.title = element_text(size = 10), 
+        legend.text = element_text(size = 8))
+
+```
+Cluster Labels Mapping:
+
+cluster_labels creates a mapping from cluster numbers to descriptive labels.
+Adding Labels to Dataframe:
+cluster_label is a new column in the dataframe that uses factor to map cluster numbers to their descriptive labels.
+Plotting with Custom Labels:
+
+The color aesthetic in ggplot2 is updated to use cluster_label, providing meaningful descriptions in the plot's legend.
+This code will produce a PCA plot with clusters labeled as "High Points, High Wins", "Moderate Points, Low Wins", and "Low Points, Low Wins" in the legend, making the plot more informative and easier to interpret.
+
+The plot shows the results of a k-means clustering analysis applied to Formula One constructor standings data. The data has been projected onto a two-dimensional space using Principal Component Analysis (PCA) for visualization. Each dot represents a constructor (F1 team).
+
+The k-means clustering algorithm has identified three distinct clusters:
+
+High Points, High Wins (Red): This cluster is characterized by constructors that consistently score high points and secure many wins throughout a season. These are likely the top-performing teams in F1.
+
+Moderate Points, Low Wins (Green): This cluster represents constructors that may score a decent amount of points but don't achieve many wins. They might be considered mid-field teams.
+
+Low Points, Low Wins (Blue):  This cluster includes constructors with low point totals and few wins. These are likely teams that struggle to compete at the highest level.
+
+The PCA plot displays the constructors' positions along the first two principal components (pca1 and pca2). These components are linear combinations of the original variables (e.g., points, wins, podiums) that capture most of the variance in the data. The spread of the clusters and the distance between them indicate how dissimilar the groups are in terms of performance.
+
+Key takeaways from this plot:
+
+There's a clear separation between the high-performing teams and the rest, suggesting a significant performance gap in F1.
+The moderate points, low wins cluster is elongated along pca1, indicating a broader range of performance levels within this group.
+The low points, low wins cluster is isolated, signifying these teams are distinct from the others in terms of performance.
+Overall, this PCA plot provides valuable insights into the competitive landscape of F1, revealing patterns and groupings among constructor standings. It can be used by teams to assess their performance relative to competitors, identify areas for improvement, and develop strategies to move up in the standings.
+
+
+
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+
+# Rename columns in qualifying
+data_list$cleaned_qualifying <- data_list$cleaned_qualifying %>%
+  rename(positionQual = position)
+
+# Rename columns in sprint_results
+data_list$cleaned_sprint_results <- data_list$cleaned_sprint_results %>%
+  rename(grid_sprint = grid_position,
+         position_sprint = position,
+         points_sprint = points
+         )
+#Rename columns in constructor_standings
+data_list$cleaned_constructor_standings <- data_list$cleaned_constructor_standings %>%
+  rename(position_cons = position)
+
+
+```
+
+
+```{r}
+# Inspect columns in cleaned_constructor_standings
+colnames(data_list$cleaned_constructor_standings)
+colnames(data_list$cleaned_qualifying)
+colnames(data_list$cleaned_sprint_results)
+
+```
+
+
+```{r}
+# Convert raceId to integer in all relevant dataframes
+data_list$cleaned_constructor_standings$raceId <- as.integer(as.character(data_list$cleaned_constructor_standings$raceId))
+data_list$cleaned_results$raceId <- as.integer(as.character(data_list$cleaned_results$raceId))
+data_list$cleaned_races$raceId <- as.integer(as.character(data_list$cleaned_races$raceId))
+data_list$cleaned_qualifying$raceId <- as.integer(as.character(data_list$cleaned_qualifying$raceId))
+data_list$cleaned_sprint_results$raceId <- as.integer(as.character(data_list$cleaned_sprint_results$raceId))
+
+
+```
+
+```{r df of constructor_standings only sprint races}
+# Finding the constructor_standings that will have Sprint_results
+
+# Get the unique raceId numbers from sprint_results
+unique_sprint_raceIds <- data_list$cleaned_sprint_results %>%
+  select(raceId) %>%
+  distinct()
+
+# Filter constructor standings to include only these raceId numbers
+filtered_constructor_standings <- data_list$cleaned_constructor_standings %>%
+  semi_join(unique_sprint_raceIds, by = "raceId")
+
+# View the filtered constructor standings
+head(filtered_constructor_standings)
+
+```
+
+```{r}
+colnames(data_list$cleaned_sprint_results)
+```
+
+
+```{r}
+
+# Merge the filtered constructor standings with the sprint results
+mergedConsSprint <- filtered_constructor_standings %>%
+  left_join(data_list$cleaned_sprint_results %>%
+              select(raceId, constructorId, position_sprint, points_sprint, grid_sprint), 
+            by = c("raceId", "constructorId"))
+
+# View the merged dataframe
+head(mergedConsSprint)
+
+```
+
+```{r}
+colnames(mergedConsSprint)
+colnames(data_list$cleaned_results)
+```
+
+```{r}
+# Rename columns in results
+data_list$cleaned_results <- data_list$cleaned_results %>%
+  rename(positionResults = position, 
+         gridResults = grid_position,
+         fastestLapRankResults = fastestLapRank)
+colnames(data_list$cleaned_results)
+colnames(data_list$cleaned_drivers)
+```
+
+```{r}
+# Merge mergedConsSprint with cleaned_races to include year, round, and circuitId
+mergedConsSprint <- mergedConsSprint %>%
+  left_join(data_list$cleaned_races %>% select(raceId, year, round, circuitId), by = "raceId")
+
+# View the merged dataframe
+head(mergedConsSprint)
+colnames(mergedConsSprint)
+
+```
+```{r}
+# Select relevant columns
+correlation_data1 <- mergedConsSprint %>%
+  select(position_cons, wins, position_sprint, grid_sprint, points_sprint)
+
+# Convert relevant columns to numeric if they are not already
+correlation_data1 <- correlation_data1 %>%
+  mutate(across(everything(), as.numeric))
+
+# Remove rows with missing values for correlation calculation
+correlation_data1 <- na.omit(correlation_data1)
+
+head(correlation_data1)
+
+```
+
+
+****I used this code to calc and create the corr. matrix, is there a way to add an * to the visualization where ever there is a statistically significant 
+
+```{r}
+library(Hmisc)
+# Calculate the correlation matrix and p-values
+cor_results <- rcorr(as.matrix(correlation_data1))
+
+# Extract the correlation matrix and p-values
+correlation_matrix1 <- cor_results$r
+p_values <- cor_results$P
+
+# Plot the correlation matrix
+corrplot(correlation_matrix1, method = "circle", type = "lower", tl.col = "black", tl.srt = 45, addCoef.col = "black")
+
+# Print the p-values
+print("P-values:")
+print(p_values)
+print("Correlation Values")
+print(correlation_matrix1)
+```
+```{r}
+# Regression analysis 
+regression_model <- lm(points ~ position_cons + wins + position_sprint + points_sprint + grid_sprint, data = mergedConsSprint)
+summary(regression_model)
+
+```
+
+
+```{r}
+# Select relevant features, excluding the problematic 'points'
+decision_tree_data <- mergedConsSprint %>%
+  select(position_cons, wins, points_sprint, position_sprint, grid_sprint, points_log, wins_log, points_ihs, wins_ihs, year, round, pca1, pca2)
+
+# Remove rows with missing values
+decision_tree_data <- na.omit(decision_tree_data)
+
+
+```
+
+
+```{r}
+# Fit decision tree model to predict 'position_cons'
+tree_model <- rpart(position_cons ~ ., data = decision_tree_data, method = "anova")
+
+# Plot the decision tree
+rpart.plot(tree_model, type = 2, extra = 101, under = TRUE, varlen = 0, faclen = 0)
+
+```
+
+```{r}
+# Print the summary of the decision tree model
+summary(tree_model)
+
+# Predict position_cons using the model
+predictions <- predict(tree_model, decision_tree_data)
+
+# Evaluate model performance (example using mean squared error)
+mse <- mean((decision_tree_data$position_cons - predictions)^2)
+print(paste("Mean Squared Error:", mse))
+
+```
+
+```{r}
+
+
+```
+```{r}
+colnames(data_list$cleaned_circuits)
+colnames(data_list$cleaned_constructor_standings)
+colnames(data_list$cleaned_driver_standings)
+```
+
+```{r}
+colnames(data_list$cleaned_results)
+```
+
+
+
+```{r}
+
+# Convert key columns to character for consistency
+data_list$cleaned_results <- data_list$cleaned_results %>%
+  mutate(raceId = as.character(raceId),
+         constructorId = as.character(constructorId),
+         driverId = as.character(driverId))
+
+data_list$cleaned_circuits <- data_list$cleaned_circuits %>%
+  mutate(circuitId = as.character(circuitId))
+
+data_list$cleaned_constructors <- data_list$cleaned_constructors %>%
+  mutate(constructorId = as.character(constructorId))
+
+data_list$cleaned_constructor_standings <- data_list$cleaned_constructor_standings %>%
+  mutate(constructorId = as.character(constructorId),
+         raceId = as.character(raceId))
+
+data_list$cleaned_driver_standings <- data_list$cleaned_driver_standings %>%
+  mutate(raceId = as.character(raceId),
+         driverId = as.character(driverId))
+
+merged_data <- data_list$cleaned_results
+
+
+
+
+```
+
+
+```{r}
+
+# Merge with cleaned_constructors
+merged_data <- merged_data %>%
+  left_join(data_list$cleaned_constructors, by = "constructorId")
+
+# Merge with cleaned_driver_standings
+merged_data <- merged_data %>%
+  left_join(data_list$cleaned_driver_standings, by = c("raceId", "driverId"))
+
+# Merge with cleaned_constructor_standings
+merged_data <- merged_data %>%
+  left_join(data_list$cleaned_constructor_standings, by = c("raceId", "constructorId"))
+
+colnames(merged_data)
+str(merged_data)
+str(data_list$cleaned_constructor_standings)
+```
+
+```{r}
+colnames(merged_data)
+```
+
+```{r}
+# Remove duplicate columns
+merged_data <- merged_data %>%
+  select(-points.y, -wins.y)
+
+# Ensure 'position_cons' is numeric
+merged_data$position_cons <- as.numeric(as.character(merged_data$position_cons))
+
+# Ensure all relevant columns are numeric or appropriately transformed
+merged_data <- merged_data %>%
+  mutate(across(where(is.character), as.factor)) %>%
+  mutate(across(where(is.factor), as.numeric))
+
+```
+
+```{r}
+# Check for missing values
+na_counts <- colSums(is.na(merged_data))
+# Remove rows with any missing values
+merged_data <- merged_data %>%
+  drop_na()
+print(na_counts)
+```
+
+```{r}
+# Check for duplicate rows
+duplicate_rows <- duplicated(merged_data)
+print(sum(duplicate_rows))
+```
+```{r}
+# Select only the relevant columns
+merged_data <- merged_data %>%
+  select(resultId, raceId, driverId, constructorId, gridResults, positionResults, points, 
+         fastestLapRankResults, statusId, fastestLapTime_seconds,
+         position, constructorStandingsId, position_cons, points_log, wins_log, points_ihs, wins_ihs,
+         cluster, pca1, pca2, cluster_label)
+
+```
+
+
+```{r}
+# Check for missing values
+na_counts <- colSums(is.na(merged_data))
+print(na_counts)
+
+# Check for duplicate rows
+duplicate_rows <- duplicated(merged_data)
+print(sum(duplicate_rows))
+colnames(merged_data)
+
+```
+
+```{r}
+library(randomForest)
+
+# Select relevant features for the Random Forest model
+features <- c("position_cons", "points_ihs", "wins_ihs", "positionResults", "gridResults",   "pca1", "pca2",  "fastestLapRankResults", "fastestLapTime_seconds")
+
+# Ensure 'position_cons' is numeric
+merged_data$position_cons <- as.numeric(as.character(merged_data$position_cons))
+
+# Train the Random Forest model
+rf_model <- randomForest(position_cons ~ ., data = merged_data[, features], ntree = 500, importance = TRUE)
+
+# Print the summary of the model
+print(rf_model)
+
+# Variable importance
+importance(rf_model)
+varImpPlot(rf_model)
+
+# Predict and evaluate the model
+predictions_rf <- predict(rf_model, merged_data[, features])
+mse_rf <- mean((merged_data$position_cons - predictions_rf)^2)
+print(paste("Mean Squared Error (Random Forest):", mse_rf))
+
+
+```
+The analysis started with the cleaned_results data frame as the base, merging additional relevant data frames including cleaned_circuits, cleaned_constructors, and cleaned_driver_standings. After handling duplicate columns and missing values, the final dataset contained key variables needed for the analysis.
+
+Modeling
+A Random Forest regression model was trained to predict the constructor position (position_cons). The model used 500 trees and considered 2 variables at each split. The model explained 82.36% of the variance in the data, with a Mean Squared Error of 0.536493.
+
+Variable Importance
+The most important variables identified were:
+
+gridResults
+fastestLapTime_seconds
+fastestLapRankResults
+pca2
+pca1
+These variables had the highest impact on predicting the constructor's position, indicating their critical role in determining race outcomes.
+
+Results
+The analysis highlighted the key factors affecting constructor performance in Formula 1 races. The insights from the Random Forest model can help teams focus on improving specific areas to enhance their competitive edge.
+
+```{r}
+library(arules)
+library(arulesViz)
+
+# Prepare data for rule mining by selecting relevant columns and converting to factors
+rule_data <- merged_data %>%
+  select(points_ihs, wins_ihs, fastestLapRankResults, gridResults, position_cons, position) %>%
+  mutate(across(everything(), as.factor))
+
+# Convert to transactions
+transactions <- as(rule_data, "transactions")
+
+# Apply the Apriori algorithm
+rules <- apriori(transactions, parameter = list(supp = 0.01, conf = 0.8))
+
+# Summary of rules
+summary(rules)
+
+# Inspect top 10 rules by lift
+top_rules <- sort(rules, by = "lift")[1:10]
+inspect(top_rules)
+
+
+# Plot the rules with the correct control parameters
+plot(top_rules, method = "graph", control = list(layout = "stress", max = 100))
+
+```
+
+
+```{r}
+library(arules)
+library(arulesViz)
+
+# Prepare data for rule mining by selecting relevant columns and converting to factors
+rule_data <- merged_data %>%
+  select(wins_ihs, fastestLapRankResults, gridResults, position_cons, position) %>%
+  mutate(across(everything(), as.factor))
+
+# Convert to transactions
+transactions <- as(rule_data, "transactions")
+
+# Apply the Apriori algorithm
+rules <- apriori(transactions, parameter = list(supp = 0.01, conf = 0.8))
+
+# Summary of rules
+summary(rules)
+
+# Inspect top rules
+inspect(sort(rules, by = "lift")[1:10])
+
+
+# Plot the rules with the correct control parameters
+plot(top_rules, method = "graph", control = list(layout = "stress", max = 100))
+
+
+
+```
+
+
+
+Some of the significant correlations observed:
+
+Grid Position and Points: The correlation is moderately negative (-0.37). This suggests that starting from further back on the grid is typically associated with scoring fewer points, perhaps because it is more challenging to overtake and achieve a higher finishing position.
+
+Position and Points: There is a strong negative correlation (-0.57) here, indicating that a better (lower number) finishing position strongly correlates with scoring more points, as expected.
+
+Position and Laps: The correlation is strongly negative (-0.65), which likely reflects that positions towards the end of the race are generally filled by those who did not complete many laps, possibly due to retiring early from the race.
+
+Points and Laps: The positive correlation (0.25) here shows that completing more laps generally leads to scoring more points, likely due to the increased chance of finishing in a points-scoring position.
+
+Fastest Lap and Fastest Lap Speed: A very high correlation (0.90) is observed, which is intuitive as a faster lap speed directly contributes to recording a faster lap time.
+
+Fastest Lap and Fastest Lap Rank: Another strong positive correlation (0.69), indicating that faster lap times are naturally ranked higher among the competitors.
+
+Status and Position: The correlation (0.53) suggests that the final race status (e.g., Finished, DNF) has a significant impact on the race position, likely indicating that non-finishers end up in lower positions.
+
+This correlation matrix provides valuable insights into the relationships between different variables in your dataset, which can be crucial for predictive modeling or understanding race dynamics in Formula 1.
+```{r}
+
+
+```
+Normalization: Using the Z-Score normalization (standardization) approach will standardize all numeric features to have a mean of zero and a standard deviation of one, ensuring that all features contribute equally without being dominated by those on larger scales.
+
+```{r}
+
+```
+
+```{r}
+
+```
+
