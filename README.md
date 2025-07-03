@@ -1,6 +1,6 @@
-# Formula 1 Data Projects: Visualization & Constructor Performance
+# Sports Analytics: Performance Prediction Modeling: Visualization & ML
 
-This repository contains two integrated data science projects focused on Formula 1 racing:
+This repository contains focused on Formula 1 racing:
 
 ## 📊 F1 Data Visualization Poster
 - Created a visual data story exploring trends in driver and constructor performance.
