@@ -1,6 +1,6 @@
 # Sports Analytics: Performance Prediction Modeling: Visualization & ML
 
-This repository contains focused on Formula 1 racing:
+This repository focuses on Formula 1 racing predictions:
 
 ## 📊 F1 Data Visualization Poster
 - Created a visual data story exploring trends in driver and constructor performance.
