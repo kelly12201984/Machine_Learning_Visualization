@@ -1,0 +1,227 @@
+---
+title: "RuleMining WIP"
+author: "Kelly Arseneau"
+date: "2024-08-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr) # Load required libraries for rule mining
+library(arules)
+library(arulesViz)
+```
+
+
+```{r}
+# Prepare selectedF1 for rule mining
+selectedF1 <- selectedF1 %>%
+  mutate(
+    results_grid = as.factor(results_grid),
+    results_points = as.factor(results_points),
+    results_position = as.factor(results_position),
+    qualifying_position = as.factor(qualifying_position),
+    results_FastLapRank = as.factor(results_FastLapRank)
+  )
+
+# Select only the columns needed
+selectedF1_for_rules <- selectedF1 %>%
+  select(results_grid, results_position, qualifying_position, results_FastLapRank, results_points)
+
+# Convert to transactions
+selectedF1_trans <- as(selectedF1_for_rules, "transactions")
+
+# Generate rules
+rules <- apriori(selectedF1_trans, parameter = list(supp = 0.01, conf = 0.8))
+
+# Inspect and plot
+inspect(rules)
+plot(rules, method = "graph", engine = "htmlwidget")
+
+```
+
+```{r}
+# Define the number of columns and rows
+num_columns <- ncol(selectedF1)
+num_rows <- nrow(selectedF1)
+
+# Calculate the validation score
+validation_score <- (num_columns * 4) * (num_rows / 100)
+validation_score
+
+```
+
+```{r}
+# Convert 'results_points' from factor to numeric
+selectedF1$results_points <- as.numeric(as.character(selectedF1$results_points))
+
+# Handle any potential NAs after conversion
+selectedF1$results_points[is.na(selectedF1$results_points)] <- 0
+
+# Calculate mean and standard deviation for 'results_points'
+mean_points <- mean(selectedF1$results_points, na.rm = TRUE)
+sd_points <- sd(selectedF1$results_points, na.rm = TRUE)
+
+# Define the threshold for high scores
+high_score_threshold <- mean_points + sd_points
+
+# Create a new column to label high scores
+selectedF1$high_points <- ifelse(selectedF1$results_points >= high_score_threshold, TRUE, FALSE)
+
+# Check the distribution of high scores
+table(selectedF1$high_points)
+
+
+```
+
+```{r}
+# Step 1: Filter top rules for visualization
+top_rules <- sort(rules, by = "lift", decreasing = TRUE)[1:10]
+
+# Step 2: Visualize top rules
+library(arulesViz)
+plot(top_rules, method = "graph", control = list(type = "items"))
+
+# Step 3: Create a binary outcome for high point scoring (e.g., >10 points)
+# Ensure results_points is numeric
+selectedF1$results_points <- as.numeric(as.character(selectedF1$results_points))
+selectedF1$high_points <- ifelse(selectedF1$results_points > 10, 1, 0)
+
+# Step 4: Logistic Regression Model
+model <- glm(high_points ~ results_grid + qualifying_position + results_FastLapRank, 
+             data = selectedF1, family = "binomial")
+
+# Step 5: Summary of the model to check predictive power
+summary(model)
+
+# Step 6: Predict using the model
+predicted_points <- predict(model, selectedF1, type = "response")
+
+# Step 7: Evaluate the predictions
+threshold <- 0.5
+predicted_labels <- ifelse(predicted_points > threshold, 1, 0)
+
+# Confusion matrix to check accuracy
+table(selectedF1$high_points, predicted_labels)
+
+```
+
+```{r}
+# Check unique values for each predictor
+table(selectedF1$results_grid)
+table(selectedF1$qualifying_position)
+table(selectedF1$results_FastLapRank)
+
+# Convert predictors to factors if they are not already, and they should have more than one level
+selectedF1$results_grid <- as.factor(selectedF1$results_grid)
+selectedF1$qualifying_position <- as.factor(selectedF1$qualifying_position)
+selectedF1$results_FastLapRank <- as.factor(selectedF1$results_FastLapRank)
+
+# Ensure the outcome variable is binary and has more than one level
+table(selectedF1$high_points)
+
+# Check for any missing values in predictors
+selectedF1 <- selectedF1 %>%
+  filter(!is.na(results_grid) & !is.na(qualifying_position) & !is.na(results_FastLapRank))
+
+# Re-run the logistic regression
+model <- glm(high_points ~ results_grid + qualifying_position + results_FastLapRank, 
+             data = selectedF1, family = "binomial")
+
+# Summary of the model to check predictive power
+summary(model)
+
+# Predict using the model
+predicted_points <- predict(model, selectedF1, type = "response")
+
+# Filter top rules for visualization
+top_rules <- sort(rules, by = "lift", decreasing = TRUE)[1:10]
+
+# Visualize top rules
+library(arulesViz)
+plot(top_rules, method = "graph", control = list(type = "items"))
+
+# Using rules in predictive modeling
+# Create a binary outcome for high point scoring (e.g., >10 points)
+selectedF1$high_points <- ifelse(selectedF1$results_points > 10, 1, 0)
+
+# Use logistic regression as a simple model
+model <- glm(high_points ~ results_grid + qualifying_position + results_FastLapRank, 
+             data = selectedF1, family = "binomial")
+
+# Summary of the model to check predictive power
+summary(model)
+
+# Predict using the model
+predicted_points <- predict(model, selectedF1, type = "response")
+
+table(selectedF1$high_points)
+
+```
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+
+# Filter the data to include only the top 3 positions for each race
+top3_drivers <- selectedF1_with_names %>%
+  filter(results_position %in% c("1", "2", "3")) %>%
+  mutate(results_position = factor(results_position, levels = c("3", "2", "1")))
+
+# Create the stacked bar plot
+ggplot(top3_drivers, aes(x = factor(raceId), fill = results_position)) +
+  geom_bar(position = "stack", width = 0.8) +
+  scale_fill_manual(values = c("firebrick1", "firebrick3", "firebrick4"), labels = c("3rd", "2nd", "1st")) +
+  labs(
+    title = "Top 3 Drivers per Race",
+    x = "Race ID",
+    y = "Count of Top 3 Positions",
+    fill = "Position"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+```
+
+```{r}
+str(selectedF1_with_pitstops_selected)
+```
+
+```{r predicted-vs-actual, echo=FALSE, fig.height=5}
+library(ggplot2)
+actual_points <- read.csv("actual_vs_predicted.csv")
+ggplot(actual_points, aes(x = actual_points, y = predicted_points, label = name)) +
+  geom_point(color = "steelblue", size = 3) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+  geom_text(nudge_y = 3, size = 3) +
+  labs(title = "Predicted vs Actual Constructor Points",
+       x = "Actual Points",
+       y = "Predicted Points") +
+  theme_minimal()
+```
+
+```{r feature-importance, echo=FALSE, fig.height=4}
+feature_importance <- read.csv("feature_importance.csv")
+ggplot(feature_importance, aes(x = reorder(feature, importance), y = importance)) +
+  geom_bar(stat = "identity", fill = "darkorange") +
+  coord_flip() +
+  labs(title = "Feature Importance",
+       x = "Feature",
+       y = "Importance Score") +
+  theme_minimal()
+```
+
+```{r parallel-coordinates, echo=FALSE, fig.height=6}
+library(GGally)
+feature_df <- read.csv("engineered_features.csv")
+feature_df$name <- as.factor(feature_df$name)
+GGally::ggparcoord(feature_df,
+                   columns = 2:4,
+                   groupColumn = 1,
+                   scale = "uniminmax") +
+  labs(title = "Parallel Coordinates Plot of Engineered Features") +
+  theme_minimal()
+```
