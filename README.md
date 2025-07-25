@@ -1,5 +1,4 @@
-# Sports Analytics: Performance Prediction Modeling: Visualization & ML
-
+# Formula 1 Performance Modeling: Sports Analytics with Visualization & Machine Learning
 This repository focuses on Formula 1 racing predictions:
 
 ## 📊 F1 Data Visualization Poster
@@ -27,3 +26,4 @@ This repository focuses on Formula 1 racing predictions:
 ## ✅ Outcomes
 - Built visuals and models that highlight how strategy, qualifying, pit stops, and consistency impact team success.
 - Produced insights that could help guide predictions and understand performance trends in F1.
+- Compared 15+ model variants; tuned SVMs, Random Forests, and kNN to reach >92% accuracy
